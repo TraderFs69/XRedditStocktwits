@@ -9,10 +9,13 @@ import streamlit as st
 
 # Heure locale
 def convert_to_local(utc_str):
-    utc_dt = datetime.datetime.strptime(utc_str, '%Y-%m-%dT%H:%M:%SZ')
-    utc_dt = utc_dt.replace(tzinfo=datetime.timezone.utc)
-    local_dt = utc_dt.astimezone(pytz.timezone('America/Toronto'))
-    return local_dt.strftime('%Y-%m-%d %H:%M:%S')
+    try:
+        utc_dt = datetime.datetime.strptime(utc_str, '%Y-%m-%dT%H:%M:%SZ')
+        utc_dt = utc_dt.replace(tzinfo=datetime.timezone.utc)
+        local_dt = utc_dt.astimezone(pytz.timezone('America/Toronto'))
+        return local_dt.strftime('%Y-%m-%d %H:%M:%S')
+    except:
+        return utc_str
 
 # Fonction pour extraire et filtrer les résultats d’une source
 def extract_articles(source, query, api_key, limit=10):
@@ -24,7 +27,9 @@ def extract_articles(source, query, api_key, limit=10):
 
     data = response.json()
     articles = []
-    pattern = re.compile(rf'(?<!\w)\${query.upper()}\b')
+
+    # 🔍 Pattern plus permissif pour cashtag ($AAPL, $AAPL.X, $AAPL150)
+    pattern = re.compile(rf'\${query.upper()}(\b|[^a-zA-Z])')
 
     if "news_results" in data:
         for result in data["news_results"]:
@@ -62,7 +67,7 @@ st.set_page_config(page_title="🔍 Cashtag Search", layout="wide")
 st.title("📊 Multi-Source Cashtag News Scraper")
 
 api_key = st.text_input("🔑 Entrez votre clé SerpAPI :", type="password")
-query = st.text_input("🔎 Cashtag (ex. EQT)", value="EQT")
+query = st.text_input("🔎 Cashtag (ex. AAPL)", value="AAPL")
 
 selected_sources = st.multiselect(
     "📰 Sources à interroger",
@@ -77,10 +82,7 @@ if st.button("Rechercher") and api_key and query:
             results = extract_articles(source, query, api_key)
             for article in results:
                 if article["date"]:
-                    try:
-                        article["date"] = convert_to_local(article["date"])
-                    except:
-                        pass
+                    article["date"] = convert_to_local(article["date"])
                 all_results.append(article)
 
     df = pd.DataFrame(all_results)
