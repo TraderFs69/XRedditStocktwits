@@ -24,6 +24,7 @@ def extract_articles(source, query, api_key, limit=10):
 
     data = response.json()
     articles = []
+    pattern = re.compile(rf'(?<!\w)\${query.upper()}\b')
 
     if "news_results" in data:
         for result in data["news_results"]:
@@ -31,7 +32,7 @@ def extract_articles(source, query, api_key, limit=10):
             snippet = result.get("snippet", "")
             link = result.get("link", "")
             date = result.get("date", "")
-            if f"${query.upper()}" in title or f"${query.upper()}" in snippet:
+            if pattern.search(title) or pattern.search(snippet):
                 articles.append({
                     "source": source,
                     "title": title,
@@ -45,7 +46,7 @@ def extract_articles(source, query, api_key, limit=10):
             snippet = result.get("snippet", "")
             link = result.get("link", "")
             date = result.get("date", "")
-            if f"${query.upper()}" in title or f"${query.upper()}" in snippet:
+            if pattern.search(title) or pattern.search(snippet):
                 articles.append({
                     "source": source,
                     "title": title,
