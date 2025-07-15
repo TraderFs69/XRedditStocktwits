@@ -1,71 +1,91 @@
 import streamlit as st
 import requests
 import pandas as pd
-from datetime import datetime
-import pytz
+from datetime import datetime, timedelta
 
-st.set_page_config(page_title="Filtrage multi-sources (X, Reddit, Stocktwits)", layout="wide")
-st.title("📰 Dashboard de nouvelles boursières (X, Reddit, Stocktwits)")
+st.set_page_config(page_title="🔍 Multi-Recherche avec Dates", layout="centered")
+st.title("🔍 Recherche SerpAPI : Twitter, Reddit, Stocktwits (triés + heure)")
 
-def convert_to_local_time(utc_string):
-    utc_time = datetime.strptime(utc_string, "%Y-%m-%dT%H:%M:%SZ")
-    local_tz = pytz.timezone("America/Toronto")
-    return utc_time.replace(tzinfo=pytz.utc).astimezone(local_tz)
+# Entrée API
+api_key = st.text_input("🔑 Entrez votre clé SerpAPI (gratuite)", type="password")
 
-query = st.text_input("🔍 Entrez un mot-clé ou un ticker (ex: Apple ou $AAPL)")
+# Mot-clé
+query = st.text_input("🔍 Entrez un mot-clé ou symbole (ex: $AAPL, Apple)", value="$AAPL")
 
-if query:
-    all_data = []
+# Date de début et fin
+col1, col2 = st.columns(2)
+with col1:
+    start_date = st.date_input("📅 Date de début", value=datetime.today() - timedelta(days=1))
+with col2:
+    end_date = st.date_input("📅 Date de fin", value=datetime.today())
 
-    # SerpAPI KEY (assumée définie via environnement ou st.secrets)
-    SERPAPI_KEY = st.secrets["SERPAPI_KEY"] if "SERPAPI_KEY" in st.secrets else "YOUR_API_KEY"
+# Nombre de résultats
+num_results = st.slider("🔢 Nombre de résultats à afficher (par plateforme)", min_value=5, max_value=50, value=10)
 
-    def fetch_serpapi_data(source):
-        url = f"https://serpapi.com/search.json?engine={source}&q={query}&api_key={SERPAPI_KEY}"
-        response = requests.get(url)
-        if response.status_code == 200:
-            return response.json()
-        return None
+# Plateformes
+platforms = st.multiselect("🌐 Plateformes à inclure", ["Twitter", "Reddit", "Stocktwits"], default=["Twitter", "Reddit", "Stocktwits"])
 
-    # X (Twitter)
-    tw_data = fetch_serpapi_data("twitter")
-    if tw_data and "tweets" in tw_data:
-        for tweet in tw_data["tweets"]:
-            all_data.append({
-                "Plateforme": "X",
-                "Auteur": tweet.get("username", ""),
-                "Contenu": tweet.get("text", ""),
-                "Date": convert_to_local_time(tweet.get("date", "")) if tweet.get("date") else "",
-                "Lien": tweet.get("link", "")
-            })
+def build_search_url(site, keyword, start_date, end_date):
+    return f"site:{site} {keyword} after:{start_date} before:{end_date + timedelta(days=1)}"
 
-    # Reddit
-    reddit_data = fetch_serpapi_data("reddit")
-    if reddit_data and "posts" in reddit_data:
-        for post in reddit_data["posts"]:
-            all_data.append({
-                "Plateforme": "Reddit",
-                "Auteur": post.get("author", ""),
-                "Contenu": post.get("title", "") + " " + post.get("text", ""),
-                "Date": convert_to_local_time(post.get("date", "")) if post.get("date") else "",
-                "Lien": post.get("link", "")
-            })
+if api_key and query and platforms:
+    all_results = []
+    for platform in platforms:
+        if platform == "Twitter":
+            site = "twitter.com"
+        elif platform == "Reddit":
+            site = "reddit.com"
+        elif platform == "Stocktwits":
+            site = "stocktwits.com"
+        else:
+            continue
 
-    # Stocktwits
-    stw_data = fetch_serpapi_data("stocktwits")
-    if stw_data and "messages" in stw_data:
-        for msg in stw_data["messages"]:
-            all_data.append({
-                "Plateforme": "Stocktwits",
-                "Auteur": msg.get("author", {}).get("username", ""),
-                "Contenu": msg.get("body", ""),
-                "Date": convert_to_local_time(msg.get("created_at", "")) if msg.get("created_at") else "",
-                "Lien": msg.get("link", "")
-            })
+        st.subheader(f"🔍 Résultats pour {platform}")
+        with st.spinner(f"Recherche sur {platform}..."):
+            params = {
+                "engine": "google",
+                "q": build_search_url(site, query, start_date, end_date),
+                "api_key": api_key,
+                "num": num_results,
+            }
+            response = requests.get("https://serpapi.com/search", params=params)
+            if response.status_code == 200:
+                results = response.json().get("organic_results", [])
+                for r in results:
+                    date_str = r.get("date", "")
+                    try:
+                        parsed_date = datetime.strptime(date_str, '%b %d, %Y')
+                    except:
+                        parsed_date = datetime.utcnow()
 
-    if all_data:
-        df = pd.DataFrame(all_data)
-        df = df.sort_values(by="Date", ascending=False)
-        st.dataframe(df, use_container_width=True)
-    else:
-        st.warning("Aucun résultat trouvé pour ce mot-clé.")
+                    all_results.append({
+                        "Plateforme": platform,
+                        "Titre": r.get("title", ""),
+                        "Lien": r.get("link", ""),
+                        "Aperçu": r.get("snippet", ""),
+                        "Date": parsed_date,
+                        "Source": site
+                    })
+            else:
+                st.error(f"Erreur API {platform} : {response.status_code} - {response.text}")
+
+    if all_results:
+        df = pd.DataFrame(all_results)
+        df.sort_values(by="Date", ascending=False, inplace=True)
+
+        for index, row in df.iterrows():
+            st.markdown(f"""
+            ---
+            🌍 **{row['Plateforme']}**  
+            🕒 **{row['Date'].strftime('%Y-%m-%d %H:%M:%S')}**  
+            🔗 **[{row['Titre']}]({row['Lien']})**  
+            💬 _{row['Aperçu']}_  
+            """)
+
+        st.download_button("📥 Télécharger tout en CSV", df.to_csv(index=False).encode("utf-8"), "multi_source_results.csv", "text/csv")
+else:
+    if not api_key:
+        st.info("🔐 Entrez votre clé SerpAPI pour démarrer.")
+    elif not platforms:
+        st.warning("❗ Sélectionnez au moins une plateforme à interroger.")
+
